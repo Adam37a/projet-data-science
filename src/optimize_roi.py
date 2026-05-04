@@ -186,6 +186,39 @@ def main() -> None:
     print(f"Saved optimization result to: {output_path}")
 
 
+def compute_optimal_allocations(model) -> dict:
+    """
+    Compute optimal budget allocations for all influencer tiers.
+    These allocations maximize ROI at a reference budget level.
+    """
+    influencers = ["Mega", "Macro", "Micro", "Nano"]
+    reference_budget = 100.0  # Reference budget for optimal allocation
+    
+    allocations = {}
+    
+    for influencer in influencers:
+        result = optimize_budget(
+            model=model,
+            total_budget=reference_budget,
+            influencer=influencer,
+            random_trials=40,
+            grid_step=0.1,
+        )
+        
+        allocations[influencer] = {
+            "influencer": influencer,
+            "optimal_ratio": result["recommended_ratio"],
+            "reference_budget": reference_budget,
+            "reference_predicted_sales": result["predicted_sales"],
+            "reference_predicted_roi": result["predicted_roi"],
+        }
+    
+    return {
+        "note": "Optimal budget allocations for ROI maximization (reference budget: 100.0)",
+        "allocations": allocations,
+    }
+
+
 if __name__ == "__main__":
     main()
 
