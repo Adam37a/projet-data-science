@@ -347,18 +347,20 @@ if section == "👤 Utilisateur":
             if "search_diagnostics" in rec:
                 diagnostics = rec["search_diagnostics"]
                 st.markdown("### ⚙️ Méthodologie d'Optimisation")
-                
+
                 st.markdown(
                     f"""
-                    **Nombre de scénarios testés :** {diagnostics['candidate_points_tested']} allocations budgétaires
-                    
-                    **Méthode utilisée :** {diagnostics['method']}
-                    
-                    **Meilleure solution trouvée par :** {diagnostics['best_solution_source']}
-                    
-                    Cette approche multi-start garantit de trouver un optimum robuste en testant 
-                    plusieurs points de départ et en les raffinant avec des techniques d'optimisation 
-                    numérique avancées.
+                    **Ce que cela signifie pour votre business :** le moteur de recommandation a comparé
+                    **{diagnostics['candidate_points_tested']}** façons différentes de répartir le budget
+                    pour retenir la solution la plus rentable.
+
+                    **Pourquoi c'est utile :**
+                    - le système ne se contente pas d'une seule idée de répartition ;
+                    - il vérifie plusieurs scénarios avant de recommander un budget ;
+                    - la proposition finale est donc plus solide et plus défendable en réunion.
+
+                    **En résumé :** la recommandation affichée est celle qui donne le meilleur équilibre
+                    entre performance attendue et sécurité de décision pour l'entreprise.
                     """
                 )
 
