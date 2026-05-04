@@ -1,0 +1,20 @@
+{
+  "rule": "If max abs numeric correlation with Sales >= 0.7 then linear_friendly else nonlinear_friendly",
+  "max_abs_numeric_correlation": 0.9966363271955413,
+  "training_mode": "linear_friendly",
+  "top_correlated_features": [
+    {
+      "Feature": "TV",
+      "CorrelationWithSales": 0.9966363271955413
+    },
+    {
+      "Feature": "Radio",
+      "CorrelationWithSales": 0.8673709047371942
+    },
+    {
+      "Feature": "Social Media",
+      "CorrelationWithSales": 0.5281160756919845
+    }
+  ],
+  "selection_strategy": "Select best model by CV score, tie-break with holdout score"
+}

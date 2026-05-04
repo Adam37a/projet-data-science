@@ -1,0 +1,52 @@
+{
+  "total_budget": 120.0,
+  "influencer": "Mega",
+  "recommended_budget": {
+    "TV": 96.0,
+    "Radio": 12.0,
+    "Social Media": 11.999999999999995
+  },
+  "recommended_ratio": {
+    "TV": 0.8,
+    "Radio": 0.1,
+    "Social Media": 0.09999999999999995
+  },
+  "predicted_sales": 342.72331658808935,
+  "predicted_roi": 2.8560276382340777,
+  "search_diagnostics": {
+    "candidate_points_tested": 261,
+    "method": "grid + random + SLSQP multi-start",
+    "best_solution_source": "candidate_search",
+    "bounds_ratio": {
+      "TV": [
+        0.1,
+        0.8
+      ],
+      "Radio": [
+        0.1,
+        0.8
+      ],
+      "Social Media": [
+        0.1,
+        0.8
+      ]
+    }
+  },
+  "marginal_impact": {
+    "TV": {
+      "ratio_shift": 0.05,
+      "delta_sales_if_ratio_increases": null,
+      "delta_sales_if_ratio_decreases": -20.924564844231725
+    },
+    "Radio": {
+      "ratio_shift": 0.05,
+      "delta_sales_if_ratio_increases": null,
+      "delta_sales_if_ratio_decreases": null
+    },
+    "Social Media": {
+      "ratio_shift": 0.05,
+      "delta_sales_if_ratio_increases": null,
+      "delta_sales_if_ratio_decreases": null
+    }
+  }
+}

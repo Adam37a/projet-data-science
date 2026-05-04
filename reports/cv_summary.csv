@@ -1,0 +1,9 @@
+Model,HoldoutScore,CVScore,Task
+RandomForestRegressor,0.9941414920053852,0.994777355151357,regression
+GradientBoostingRegressor,0.99390106381697,0.9940121503061181,regression
+LinearRegression,0.9921137106941211,0.993576452102381,regression
+MLPRegressor,0.9913325863414016,0.9928355279618826,regression
+RandomForestClassifier,0.9868904623234463,0.982440642399386,classification
+GradientBoostingClassifier,0.9814398694073477,0.9794994624880882,classification
+MLPClassifier,0.9813933240573057,0.9777388823761907,classification
+LogisticRegression,0.9781770847946526,0.9771373728620671,classification

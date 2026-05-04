@@ -1,0 +1,9 @@
+{
+  "best_regression_model": "RandomForestRegressor",
+  "best_regression_r2": 0.9941414920053852,
+  "best_regression_cv_r2": 0.994777355151357,
+  "best_classification_model": "RandomForestClassifier",
+  "best_classification_f1_macro": 0.9868904623234463,
+  "best_classification_cv_f1_macro": 0.982440642399386,
+  "training_mode": "linear_friendly"
+}
