@@ -128,7 +128,7 @@ def optimize_budget(
             bounds=bounds,
             constraints=constraints,
             method="SLSQP",
-            options={"maxiter": 300, "ftol": 1e-9},
+            options={"maxiter": 100, "ftol": 1e-6},
         )
         if result.success and is_feasible(result.x):
             refined_ratios = np.array(result.x, dtype=float)

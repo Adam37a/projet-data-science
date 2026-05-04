@@ -10,7 +10,10 @@ from src.optimize_roi import optimize_budget
 
 
 ROOT = Path(__file__).resolve().parent
-MODEL_PATH = ROOT / "models" / "best_regression_model.joblib"
+
+REG_MODEL_PATH = ROOT / "models" / "best_regression_model.joblib"
+CLF_MODEL_PATH = ROOT / "models" / "best_classification_model.joblib"
+
 REG_METRICS_PATH = ROOT / "reports" / "regression_metrics.csv"
 CLF_METRICS_PATH = ROOT / "reports" / "classification_metrics.csv"
 BEST_MODELS_PATH = ROOT / "reports" / "best_models.json"
@@ -20,21 +23,17 @@ POLICY_PATH = ROOT / "reports" / "model_selection_policy.json"
 
 
 @st.cache_resource
-def load_model():
-    if not MODEL_PATH.exists():
+def load_regression_model():
+    if not REG_MODEL_PATH.exists():
         return None
-    return joblib.load(MODEL_PATH)
+    return joblib.load(REG_MODEL_PATH)
 
 
-@st.cache_data(show_spinner=False)
-def run_dynamic_optimization(total_budget: float, influencer: str):
-    return optimize_budget(
-        model=model,
-        total_budget=total_budget,
-        influencer=influencer,
-        random_trials=120,
-        grid_step=0.05,
-    )
+@st.cache_resource
+def load_classification_model():
+    if not CLF_MODEL_PATH.exists():
+        return None
+    return joblib.load(CLF_MODEL_PATH)
 
 
 def safe_get(data: dict, key: str, default=None):
@@ -42,481 +41,572 @@ def safe_get(data: dict, key: str, default=None):
 
 
 st.set_page_config(page_title="Marketing ROI Dashboard", layout="wide")
-st.title("Marketing ROI Optimization Dashboard")
 
-model = load_model()
+# Title & Logo
+col_title, col_spacer = st.columns([1, 4])
+with col_title:
+    st.markdown("## 🎯 Marketing ROI Optimizer")
 
-if model is None:
-    st.warning("Model not found. Run `python src/train.py` first.")
+reg_model = load_regression_model()
+clf_model = load_classification_model()
+
+if reg_model is None:
+    st.warning("Regression model not found. Run `python src/train.py` first.")
     st.stop()
 
-st.sidebar.header("Campaign Inputs")
+
+@st.cache_data(show_spinner=False)
+def run_dynamic_optimization(total_budget: float, influencer: str):
+    return optimize_budget(
+        model=reg_model,
+        total_budget=total_budget,
+        influencer=influencer,
+        random_trials=40,
+        grid_step=0.1,
+    )
+
+
+# ============================================================================
+# SIDEBAR: Campaign Inputs (Utilisateur)
+# ============================================================================
+st.sidebar.header("📊 Paramètres de la Campagne")
+
 tv = st.sidebar.slider("TV budget", min_value=0.0, max_value=300.0, value=80.0, step=1.0)
 radio = st.sidebar.slider("Radio budget", min_value=0.0, max_value=100.0, value=25.0, step=1.0)
 social = st.sidebar.slider("Social Media budget", min_value=0.0, max_value=100.0, value=10.0, step=1.0)
-influencer = st.sidebar.selectbox("Influencer tier", ["Mega", "Macro", "Micro", "Nano"])
+influencer = st.sidebar.selectbox("Tier d'influenceur", ["Mega", "Macro", "Micro", "Nano"])
 
 input_df = pd.DataFrame(
     [{"TV": tv, "Radio": radio, "Social Media": social, "Influencer": influencer}]
 )
 
-pred_sales = float(model.predict(input_df)[0])
+pred_sales = float(reg_model.predict(input_df)[0])
 total_budget = tv + radio + social
 pred_roi = pred_sales / max(total_budget, 1e-9)
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Predicted Sales", f"{pred_sales:,.2f}")
-col2.metric("Total Budget", f"{total_budget:,.2f}")
-col3.metric("Estimated ROI", f"{pred_roi:.3f}")
+pred_class = None
+if clf_model is not None:
+    pred_class = clf_model.predict(input_df)[0]
 
-tab_roi, tab_perf, tab_compare, tab_analysis = st.tabs(
-    [
-        "Simulation ROI",
-        "Performances des modèles",
-        "Comparaison des modèles",
-        "Analyse & interprétabilité",
-    ]
+st.sidebar.markdown("---")
+st.sidebar.subheader("📈 Prédictions Actuelles")
+
+col1, col2 = st.sidebar.columns(2)
+col1.metric("Ventes prédites", f"{pred_sales:,.0f}")
+col2.metric("ROI estimé", f"{pred_roi:.3f}")
+
+col3, col4 = st.sidebar.columns(2)
+col3.metric("Budget total", f"{total_budget:,.0f}")
+if pred_class is not None:
+    col4.metric("Classe", str(pred_class))
+
+
+# ============================================================================
+# MAIN TABS: Section Admin vs Section Utilisateur
+# ============================================================================
+section = st.radio(
+    "Sélectionnez votre espace :",
+    ["👤 Utilisateur", "🔧 Admin"],
+    horizontal=True,
+    label_visibility="collapsed"
 )
 
-with tab_roi:
-    st.subheader("Scénario sélectionné par l'utilisateur")
-    st.dataframe(input_df, use_container_width=True)
-
-    st.info(
-        "Cette section permet à un responsable marketing de simuler un budget de campagne "
-        "et d’estimer immédiatement les ventes attendues ainsi que le ROI."
+if section == "👤 Utilisateur":
+    tab_roi, tab_recommend, tab_analysis = st.tabs(
+        [
+            "🎮 Simulation ROI",
+            "💼 Modèle Business Optimal",
+            "📊 Analyse & Interprétabilité",
+        ]
     )
-
-    scenario_df = pd.DataFrame(
-        {
-            "Canal": ["TV", "Radio", "Social Media"],
-            "Budget": [tv, radio, social],
-        }
-    )
-
-    st.subheader("Répartition actuelle du budget")
-    st.bar_chart(scenario_df.set_index("Canal"))
-
-    if total_budget <= 0:
-        st.warning("Veuillez saisir un budget total supérieur à 0 pour lancer l’optimisation.")
-    else:
-        with st.spinner("Optimisation dynamique de la répartition budgétaire..."):
-            rec = run_dynamic_optimization(total_budget, influencer)
-
-        rec_df = pd.DataFrame(
-            {
-                "Canal": list(rec["recommended_budget"].keys()),
-                "Budget recommandé": list(rec["recommended_budget"].values()),
-                "Ratio recommandé": [
-                    rec["recommended_ratio"][k]
-                    for k in rec["recommended_budget"].keys()
-                ],
-            }
+    
+    # ========== TAB 1: SIMULATION ROI ==========
+    with tab_roi:
+        st.subheader("Simulation de Campagne Marketing")
+        
+        st.info(
+            "Ajustez les budgets des différents canaux marketing via la barre latérale pour "
+            "simuler l'impact sur les ventes et le ROI de votre campagne."
         )
-
-        st.subheader("Répartition budgétaire recommandée")
-
+        
         col_a, col_b = st.columns(2)
-        col_a.metric("Ventes prédites après optimisation", f"{rec['predicted_sales']:.2f}")
-        col_b.metric("ROI prédit après optimisation", f"{rec['predicted_roi']:.3f}")
-
-        st.dataframe(rec_df, use_container_width=True)
-
-        st.subheader("Budget recommandé par canal")
-        st.bar_chart(rec_df.set_index("Canal")[["Budget recommandé"]])
-
-        st.subheader("Ratio recommandé par canal")
-        st.bar_chart(rec_df.set_index("Canal")[["Ratio recommandé"]])
-
-        best_channel_row = rec_df.sort_values("Ratio recommandé", ascending=False).iloc[0]
-        best_channel = best_channel_row["Canal"]
-        best_ratio = best_channel_row["Ratio recommandé"]
-
-        st.subheader("Recommandation business")
-        st.success(
-            f"L’allocation optimisée recommande de prioriser **{best_channel}**, "
-            f"avec **{best_ratio:.0%}** du budget marketing total."
-        )
-
-        st.write(
-            "Selon le modèle entraîné, cette répartition devrait maximiser le ROI prédit "
-            "sous les contraintes budgétaires définies. Concrètement, le modèle recommande "
-            "de concentrer l’investissement sur le canal ayant l’impact attendu le plus fort "
-            "sur les ventes."
-        )
-
-        if "marginal_impact" in rec:
-            st.subheader("Analyse de l’impact marginal")
-
-            impact_rows = []
-            for channel, values in rec["marginal_impact"].items():
-                increase = values["delta_sales_if_ratio_increases"]
-                decrease = values["delta_sales_if_ratio_decreases"]
-
-                impact_rows.append(
+        
+        with col_a:
+            st.markdown("### 📌 Paramètres Saisis")
+            scenario_df = pd.DataFrame(
+                {
+                    "Canal": ["TV", "Radio", "Social Media", "**Total**"],
+                    "Budget": [tv, radio, social, total_budget],
+                    "% du total": [
+                        f"{tv/total_budget*100:.1f}%" if total_budget > 0 else "0%",
+                        f"{radio/total_budget*100:.1f}%" if total_budget > 0 else "0%",
+                        f"{social/total_budget*100:.1f}%" if total_budget > 0 else "0%",
+                        "100%"
+                    ]
+                }
+            )
+            st.dataframe(scenario_df, use_container_width=True, hide_index=True)
+        
+        with col_b:
+            st.markdown("### 💰 Prédictions du Scénario")
+            col_x, col_y, col_z = st.columns(3)
+            col_x.metric("Ventes prédites", f"{pred_sales:,.0f}")
+            col_y.metric("ROI estimé", f"{pred_roi:.3f}")
+            col_z.metric("Tier influenceur", influencer)
+        
+        st.markdown("---")
+        
+        # Graphiques de répartition
+        col_chart1, col_chart2 = st.columns(2)
+        
+        with col_chart1:
+            st.markdown("### 📊 Répartition Actuelle (Budget)")
+            chart_data = pd.DataFrame(
+                {"Canal": ["TV", "Radio", "Social Media"], "Budget": [tv, radio, social]}
+            )
+            st.bar_chart(chart_data.set_index("Canal"))
+        
+        with col_chart2:
+            st.markdown("### 📊 Répartition Actuelle (% Ratio)")
+            if total_budget > 0:
+                chart_ratio = pd.DataFrame(
                     {
-                        "Canal": channel,
-                        "Variation des ventes si la part augmente": (
-                            round(increase, 4)
-                            if increase is not None
-                            else "Non applicable - limite atteinte"
-                        ),
-                        "Variation des ventes si la part diminue": (
-                            round(decrease, 4)
-                            if decrease is not None
-                            else "Non applicable - limite atteinte"
-                        ),
+                        "Canal": ["TV", "Radio", "Social Media"],
+                        "Ratio": [tv/total_budget, radio/total_budget, social/total_budget]
                     }
                 )
-
-            impact_df = pd.DataFrame(impact_rows)
-            st.dataframe(impact_df, use_container_width=True)
-
-            st.info(
-                "L’impact marginal estime comment les ventes prédites évoluent lorsqu’une "
-                "part du budget est déplacée d’un canal vers un autre, tout en gardant le "
-                "même budget total."
+                st.bar_chart(chart_ratio.set_index("Canal"))
+            else:
+                st.warning("Budget total = 0. Impossible de calculer les ratios.")
+    
+    # ========== TAB 2: MODÈLE BUSINESS OPTIMAL ==========
+    with tab_recommend:
+        st.subheader("🎯 Allocation Budgétaire Recommandée")
+        
+        st.markdown(
+            "Cette section présente l'allocation budgétaire optimale calculée pour **maximiser "
+            "les ventes** en fonction du budget total et du tier d'influenceur sélectionnés."
+        )
+        
+        if total_budget <= 0:
+            st.warning("⚠️ Veuillez saisir un budget total supérieur à 0 pour afficher les recommandations.")
+        else:
+            with st.spinner("⏳ Calcul de l'allocation optimale..."):
+                rec = run_dynamic_optimization(total_budget, influencer)
+            
+            # === Résultats Clés ===
+            st.markdown("### 📈 Résultats de l'Optimisation")
+            
+            col_res1, col_res2, col_res3 = st.columns(3)
+            col_res1.metric(
+                "💵 Ventes Prédites (Optimisées)",
+                f"{rec['predicted_sales']:,.0f}",
+                delta=f"{rec['predicted_sales'] - pred_sales:+,.0f} vs simulation actuelle"
             )
-
-        if "search_diagnostics" in rec:
-            diagnostics = rec["search_diagnostics"]
-            st.subheader("Résumé de la méthode d’optimisation")
-
-            st.write(
-                f"L’optimisation a testé **{diagnostics['candidate_points_tested']}** "
-                f"combinaisons budgétaires avec la méthode : "
-                f"**{diagnostics['method']}**."
+            col_res2.metric(
+                "📊 ROI Optimisé",
+                f"{rec['predicted_roi']:.3f}",
+                delta=f"{rec['predicted_roi'] - pred_roi:+.3f} vs ROI actuel"
             )
-
-            st.write(
-                "Le système explore plusieurs répartitions possibles avant de sélectionner "
-                "celle qui offre la meilleure performance prédite."
+            col_res3.metric(
+                "🎯 Budget Total",
+                f"{rec['total_budget']:,.0f}"
             )
+            
+            st.markdown("---")
+            
+            # === Tableau de Répartition ===
+            st.markdown("### 💼 Répartition Budgétaire Recommandée")
+            
+            rec_budget_raw = list(rec["recommended_budget"].values())
+            rec_df = pd.DataFrame(
+                {
+                    "Canal": list(rec["recommended_budget"].keys()),
+                    "Budget Recommandé": rec_budget_raw,
+                    "Ratio Recommandé": [
+                        rec["recommended_ratio"][k]
+                        for k in rec["recommended_budget"].keys()
+                    ],
+                    "Budget Actuel": [tv, radio, social],
+                }
+            )
+            
+            rec_df["Différence"] = rec_df["Budget Recommandé"] - rec_df["Budget Actuel"]
+            rec_df_display = rec_df.copy()
+            rec_df_display["Budget Recommandé"] = rec_df_display["Budget Recommandé"].apply(lambda x: f"{x:,.0f}")
+            rec_df_display["Budget Actuel"] = rec_df_display["Budget Actuel"].apply(lambda x: f"{x:,.0f}")
+            rec_df_display["Différence"] = rec_df_display["Différence"].apply(lambda x: f"{x:+,.0f}")
+            rec_df_display["Ratio Recommandé"] = rec_df_display["Ratio Recommandé"].apply(lambda x: f"{x:.1%}")
+            
+            st.dataframe(rec_df_display, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            
+            # === Visualisations ===
+            st.markdown("### 📊 Visualisations")
+            
+            col_viz1, col_viz2 = st.columns(2)
+            
+            with col_viz1:
+                st.markdown("**Répartition Recommandée (Budget)**")
+                rec_budget_chart = pd.DataFrame(
+                    {
+                        "Canal": list(rec["recommended_budget"].keys()),
+                        "Budget": rec_budget_raw,
+                    }
+                )
+                st.bar_chart(rec_budget_chart.set_index("Canal"))
+            
+            with col_viz2:
+                st.markdown("**Répartition Recommandée (Ratio %)**")
+                rec_ratio_chart = pd.DataFrame(
+                    {
+                        "Canal": list(rec["recommended_ratio"].keys()),
+                        "Ratio": list(rec["recommended_ratio"].values()),
+                    }
+                )
+                st.bar_chart(rec_ratio_chart.set_index("Canal"))
+            
+            st.markdown("---")
+            
+            # === Justification Business ===
+            st.markdown("### 💡 Justification Business")
+            
+            best_channel_row = max(
+                rec["recommended_ratio"].items(),
+                key=lambda x: x[1]
+            )
+            best_channel = best_channel_row[0]
+            best_ratio = best_channel_row[1]
+            
+            justification_text = f"""
+            **Recommandation Clé :** Allouer **{best_ratio:.0%}** du budget marketing au canal **{best_channel}**.
+            
+            **Justification :**
+            - Le modèle d'optimisation analyse l'impact marginal de chaque canal sur les ventes
+            - Cette allocation maximise le retour sur investissement (ROI) prédit
+            - Le ROI représente le ratio entre les ventes générées et le budget investi
+            - En concentrant les efforts sur {best_channel}, vous maximisez le chiffre d'affaires 
+              pour chaque euro dépensé
+            
+            **Impact Financier Estimé :**
+            - **Ventes supplémentaires :** {rec['predicted_sales'] - pred_sales:+,.0f}
+            - **Amélioration du ROI :** {(rec['predicted_roi'] - pred_roi) / pred_roi * 100:+.1f}%
+            """
+            
+            st.success(justification_text)
+            
+            st.markdown("---")
+            
+            # === Analyse Marginal (Impact) ===
+            if "marginal_impact" in rec:
+                st.markdown("### 🔍 Analyse de Sensibilité (Impact Marginal)")
+                
+                st.markdown(
+                    "Cette analyse montre comment les ventes évoluent si vous déplacez "
+                    "une petite part du budget d'un canal vers un autre."
+                )
+                
+                impact_rows = []
+                for channel, values in rec["marginal_impact"].items():
+                    increase = values["delta_sales_if_ratio_increases"]
+                    decrease = values["delta_sales_if_ratio_decreases"]
+                    
+                    impact_rows.append({
+                        "Canal": channel,
+                        "Si la part augmente": (
+                            f"+{increase:,.0f} ventes" if increase is not None else "Limite atteinte"
+                        ),
+                        "Si la part diminue": (
+                            f"{decrease:,.0f} ventes" if decrease is not None else "Limite atteinte"
+                        ),
+                    })
+                
+                impact_df = pd.DataFrame(impact_rows)
+                st.dataframe(impact_df, use_container_width=True, hide_index=True)
+                
+                st.info(
+                    "**Interprétation :** Les valeurs positives signifient qu'augmenter l'investissement "
+                    "dans ce canal augmente les ventes. Les valeurs négatives signifient le contraire. "
+                    "Plus la valeur est grande (en valeur absolue), plus l'impact est important."
+                )
+            
+            st.markdown("---")
+            
+            # === Diagnostique de la Méthode ===
+            if "search_diagnostics" in rec:
+                diagnostics = rec["search_diagnostics"]
+                st.markdown("### ⚙️ Méthodologie d'Optimisation")
+                
+                st.markdown(
+                    f"""
+                    **Nombre de scénarios testés :** {diagnostics['candidate_points_tested']} allocations budgétaires
+                    
+                    **Méthode utilisée :** {diagnostics['method']}
+                    
+                    **Meilleure solution trouvée par :** {diagnostics['best_solution_source']}
+                    
+                    Cette approche multi-start garantit de trouver un optimum robuste en testant 
+                    plusieurs points de départ et en les raffinant avec des techniques d'optimisation 
+                    numérique avancées.
+                    """
+                )
+    
+    # ========== TAB 3: ANALYSE & INTERPRÉTABILITÉ ==========
+    with tab_analysis:
+        st.subheader("📊 Analyse & Interprétabilité")
+        
+        st.markdown(
+            "Explorez les facteurs qui influencent les prédictions du modèle et comprendre "
+            "les relations entre les variables de marketing."
+        )
+        
+        # === Corrélation avec les ventes ===
+        st.markdown("### 📈 Influence des Canaux sur les Ventes")
+        
+        if CORR_PATH.exists():
+            corr_df = pd.read_csv(CORR_PATH)
+            st.dataframe(corr_df, use_container_width=True, hide_index=True)
+            
+            chart_df = corr_df[["Feature", "CorrelationWithSales"]].set_index("Feature")
+            st.bar_chart(chart_df)
+            
+            if "AbsCorrelation" in corr_df.columns:
+                top_feature = corr_df.sort_values("AbsCorrelation", ascending=False).iloc[0]
+                
+                st.success(
+                    f"**Variable la plus influente :** {top_feature['Feature']} "
+                    f"(corrélation : {top_feature['CorrelationWithSales']:.3f})\n\n"
+                    f"Cela signifie que {top_feature['Feature']} est le canal qui impacte "
+                    f"le plus les ventes. Suivre et optimiser ce canal devrait être une priorité "
+                    f"stratégique dans votre stratégie marketing."
+                )
+        else:
+            st.info("Le fichier d'analyse de corrélation n'est pas disponible.")
+        
+        st.markdown("---")
+        
+        # === Validation Croisée ===
+        st.markdown("### ✅ Fiabilité des Prédictions")
+        
+        if CV_PATH.exists():
+            cv_df = pd.read_csv(CV_PATH)
+            st.dataframe(cv_df, use_container_width=True, hide_index=True)
+            
+            if "CVScore" in cv_df.columns:
+                st.bar_chart(cv_df[["Model", "CVScore"]].set_index("Model"))
+                
+                avg_cv = cv_df["CVScore"].mean()
+                st.info(
+                    f"**Score moyen de validation croisée :** {avg_cv:.3f}\n\n"
+                    f"La validation croisée teste le modèle sur plusieurs découpages des données. "
+                    f"Un score élevé indique que le modèle généralise bien et que ses prédictions "
+                    f"sont fiables sur de nouvelles données."
+                )
+        else:
+            st.info("Le fichier de validation croisée n'est pas disponible.")
+        
+        st.markdown("---")
+        
+        # === Stratégie d'Entraînement ===
+        st.markdown("### 🎓 Stratégie d'Entraînement")
+        
+        if POLICY_PATH.exists():
+            with POLICY_PATH.open("r", encoding="utf-8") as f:
+                policy = json.load(f)
+            
+            training_mode = safe_get(policy, "training_mode", "unknown")
+            max_corr = safe_get(policy, "max_abs_numeric_correlation", None)
+            
+            st.markdown(
+                f"**Mode d'entraînement :** {training_mode}\n\n"
+                f"Le modèle a été sélectionné en fonction de l'analyse préalable des données. "
+                f"Si la corrélation était forte, un modèle plus simple a été privilégié. "
+                f"Sinon, un modèle plus complexe a été utilisé pour capturer les relations non-linéaires."
+            )
+            
+            if "top_correlated_features" in policy:
+                st.markdown("**Variables clés utilisées pour la modélisation :**")
+                top_features_df = pd.DataFrame(policy["top_correlated_features"])
+                st.dataframe(top_features_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Le fichier de politique d'entraînement n'est pas disponible.")
 
-
-with tab_perf:
-    st.subheader("Performance des modèles")
-
-    # Lecture robuste des métriques
-    reg_metrics_df = None
-    clf_metrics_df = None
-
-    try:
+# ============================================================================
+# SECTION ADMIN: Onglets Admin
+# ============================================================================
+else:  # section == "🔧 Admin"
+    tab_perf, tab_compare = st.tabs(
+        [
+            "🏆 Performance des Modèles",
+            "📈 Comparaison des Modèles",
+        ]
+    )
+    
+    # ========== TAB 1: PERFORMANCE DES MODÈLES ==========
+    with tab_perf:
+        st.subheader("🏆 Performance des Modèles")
+        
+        st.markdown(
+            "Vue détaillée des performances des modèles de régression et classification "
+            "sur le jeu de test et en validation croisée."
+        )
+        
+        # === RÉGRESSION ===
+        st.markdown("### 📊 Modèles de Régression")
+        
+        reg_metrics_df = None
         if REG_METRICS_PATH.exists():
             reg_metrics_df = pd.read_csv(REG_METRICS_PATH)
-    except Exception as exc:  # pragma: no cover - UI safety
-        st.error(f"Erreur en lisant {REG_METRICS_PATH.name}: {exc}")
-
-    try:
+        
+        if reg_metrics_df is not None and not reg_metrics_df.empty:
+            st.dataframe(reg_metrics_df, use_container_width=True, hide_index=True)
+            
+            col_r1, col_r2 = st.columns(2)
+            
+            with col_r1:
+                if "R2" in reg_metrics_df.columns:
+                    st.markdown("**R² (Coefficient de Détermination)**")
+                    r2_chart = reg_metrics_df[["Model", "R2"]].set_index("Model")
+                    st.bar_chart(r2_chart)
+            
+            with col_r2:
+                if "RMSE" in reg_metrics_df.columns:
+                    st.markdown("**RMSE (Erreur Quadratique Moyenne)**")
+                    rmse_chart = reg_metrics_df[["Model", "RMSE"]].set_index("Model")
+                    st.bar_chart(rmse_chart)
+            
+            if {"Model", "R2", "RMSE"}.issubset(reg_metrics_df.columns):
+                best_reg_row = reg_metrics_df.sort_values(
+                    by=["R2", "RMSE"],
+                    ascending=[False, True],
+                ).iloc[0]
+                
+                st.success(
+                    f"**Meilleur modèle en régression :** {best_reg_row['Model']}\n\n"
+                    f"- R² : {best_reg_row['R2']:.4f} (explique {best_reg_row['R2']*100:.1f}% de la variance)\n"
+                    f"- RMSE : {best_reg_row['RMSE']:.4f} (erreur moyenne de prédiction)"
+                )
+        else:
+            st.info("❌ Fichier de métriques de régression non disponible.")
+        
+        st.markdown("---")
+        
+        # === CLASSIFICATION ===
+        st.markdown("### 🎯 Modèles de Classification")
+        
+        clf_metrics_df = None
         if CLF_METRICS_PATH.exists():
             clf_metrics_df = pd.read_csv(CLF_METRICS_PATH)
-    except Exception as exc:  # pragma: no cover - UI safety
-        st.error(f"Erreur en lisant {CLF_METRICS_PATH.name}: {exc}")
-
-    # Affichage régression
-    st.markdown("### Régression")
-    if reg_metrics_df is not None and not reg_metrics_df.empty:
-        st.dataframe(reg_metrics_df, use_container_width=True)
-
-        if "R2" in reg_metrics_df.columns:
-            st.write("Comparaison des modèles selon le R²")
-            st.bar_chart(reg_metrics_df[["Model", "R2"]].set_index("Model"))
-
-        if "RMSE" in reg_metrics_df.columns:
-            st.write("Comparaison des modèles selon le RMSE")
-            st.bar_chart(reg_metrics_df[["Model", "RMSE"]].set_index("Model"))
-
-        if {"Model", "R2", "RMSE"}.issubset(reg_metrics_df.columns):
-            best_reg_row = reg_metrics_df.sort_values(
-                by=["R2", "RMSE"],
-                ascending=[False, True]
-            ).iloc[0]
-
-            st.success(
-                f"En régression, le meilleur modèle observé est **{best_reg_row['Model']}**. "
-                f"Il obtient un R² de **{best_reg_row['R2']:.4f}** et un RMSE de "
-                f"**{best_reg_row['RMSE']:.4f}**."
-            )
-    else:
-        st.info("Le fichier de métriques de régression est manquant ou vide.")
-
-    # Affichage classification
-    st.markdown("### Classification")
-    if clf_metrics_df is not None and not clf_metrics_df.empty:
-        st.dataframe(clf_metrics_df, use_container_width=True)
-
-        if "F1_macro" in clf_metrics_df.columns:
-            st.write("Comparaison des modèles selon le F1-macro")
-            st.bar_chart(clf_metrics_df[["Model", "F1_macro"]].set_index("Model"))
-
-        if {"Model", "Accuracy", "F1_macro"}.issubset(clf_metrics_df.columns):
-            best_clf_row = clf_metrics_df.sort_values(
-                by=["F1_macro", "Accuracy"],
-                ascending=[False, False]
-            ).iloc[0]
-
-            st.success(
-                f"En classification, le meilleur modèle observé est **{best_clf_row['Model']}**. "
-                f"Il obtient une Accuracy de **{best_clf_row['Accuracy']:.4f}** et un F1-macro "
-                f"de **{best_clf_row['F1_macro']:.4f}**."
-            )
-    else:
-        st.info("Le fichier de métriques de classification est manquant ou vide.")
-
-    # Fallbacks et informations complémentaires
-    st.markdown("---")
-    st.subheader("Informations complémentaires")
-
-    # best_models.json
-    if BEST_MODELS_PATH.exists():
-        try:
+        
+        if clf_metrics_df is not None and not clf_metrics_df.empty:
+            st.dataframe(clf_metrics_df, use_container_width=True, hide_index=True)
+            
+            col_c1, col_c2 = st.columns(2)
+            
+            with col_c1:
+                if "F1_macro" in clf_metrics_df.columns:
+                    st.markdown("**F1-Macro Score**")
+                    f1_chart = clf_metrics_df[["Model", "F1_macro"]].set_index("Model")
+                    st.bar_chart(f1_chart)
+            
+            with col_c2:
+                if "Accuracy" in clf_metrics_df.columns:
+                    st.markdown("**Accuracy**")
+                    acc_chart = clf_metrics_df[["Model", "Accuracy"]].set_index("Model")
+                    st.bar_chart(acc_chart)
+            
+            if {"Model", "Accuracy", "F1_macro"}.issubset(clf_metrics_df.columns):
+                best_clf_row = clf_metrics_df.sort_values(
+                    by=["F1_macro", "Accuracy"],
+                    ascending=[False, False],
+                ).iloc[0]
+                
+                st.success(
+                    f"**Meilleur modèle en classification :** {best_clf_row['Model']}\n\n"
+                    f"- Accuracy : {best_clf_row['Accuracy']:.4f} ({best_clf_row['Accuracy']*100:.1f}%)\n"
+                    f"- F1-Macro : {best_clf_row['F1_macro']:.4f}"
+                )
+        else:
+            st.info("❌ Fichier de métriques de classification non disponible.")
+        
+        st.markdown("---")
+        
+        # === RÉSUMÉ BEST MODELS ===
+        st.markdown("### 🌟 Modèles Sélectionnés (Finaux)")
+        
+        if BEST_MODELS_PATH.exists():
             with BEST_MODELS_PATH.open("r", encoding="utf-8") as f:
                 best_models = json.load(f)
-
-            st.write("Résumé des meilleurs modèles (fichier best_models.json):")
-            st.json(best_models)
-        except Exception as exc:  # pragma: no cover - UI safety
-            st.error(f"Impossible de lire {BEST_MODELS_PATH.name}: {exc}")
-    else:
-        st.info("Le fichier best_models.json est manquant.")
-
-    # CV summary
-    if CV_PATH.exists():
-        try:
-            cv_df = pd.read_csv(CV_PATH)
-            st.write("Synthèse de la validation croisée:")
-            st.dataframe(cv_df, use_container_width=True)
-            if {"Model", "CVScore"}.issubset(cv_df.columns):
-                st.bar_chart(cv_df[["Model", "CVScore"]].set_index("Model"))
-        except Exception as exc:  # pragma: no cover - UI safety
-            st.error(f"Impossible de lire {CV_PATH.name}: {exc}")
-    else:
-        st.info("Le fichier cv_summary.csv est manquant.")
-
-    # Lister les modèles présents sur le disque
-    models_dir = ROOT / "models"
-    if models_dir.exists():
-        model_files = sorted(models_dir.glob("*.joblib"))
-        if model_files:
-            st.write("Modèles sauvegardés sur le disque:")
-            for mf in model_files:
-                try:
-                    size_mb = mf.stat().st_size / 1024**2
-                    st.write(f"- {mf.name} — {size_mb:.2f} MB")
-                    m = joblib.load(mf)
-                    st.write(f"  - Classe: {m.__class__.__name__}")
-                    if hasattr(m, "get_params"):
-                        params = m.get_params()
-                        # n'affiche que quelques paramètres pour lisibilité
-                        sample = {k: params[k] for k in list(params)[:8]}
-                        st.write(f"  - Paramètres (extraits): {sample}")
-                except Exception as exc:  # pragma: no cover - UI safety
-                    st.write(f"- {mf.name} — erreur lecture modèle: {exc}")
+            
+            col_m1, col_m2 = st.columns(2)
+            
+            with col_m1:
+                st.success(
+                    f"**🔴 Régression**\n\n"
+                    f"Modèle : {best_models['best_regression_model']}\n"
+                    f"R² Test : {best_models['best_regression_r2']:.4f}\n"
+                    f"R² CV : {best_models['best_regression_cv_r2']:.4f}"
+                )
+            
+            with col_m2:
+                st.success(
+                    f"**🟢 Classification**\n\n"
+                    f"Modèle : {best_models['best_classification_model']}\n"
+                    f"F1-Macro : {best_models['best_classification_f1_macro']:.4f}\n"
+                    f"F1-Macro CV : {best_models['best_classification_cv_f1_macro']:.4f}"
+                )
+    
+    # ========== TAB 2: COMPARAISON DES MODÈLES ==========
+    with tab_compare:
+        st.subheader("📈 Comparaison des Modèles")
+        
+        st.markdown(
+            "Comparaison détaillée des performances de tous les modèles testés, "
+            "triés par performance descendante."
+        )
+        
+        reg_metrics_df = pd.read_csv(REG_METRICS_PATH) if REG_METRICS_PATH.exists() else None
+        clf_metrics_df = pd.read_csv(CLF_METRICS_PATH) if CLF_METRICS_PATH.exists() else None
+        
+        if reg_metrics_df is None and clf_metrics_df is None:
+            st.warning("❌ Aucun fichier de métriques trouvé.")
         else:
-            st.info("Aucun fichier .joblib trouvé dans le dossier models/.")
-    else:
-        st.info("Le dossier models/ est manquant.")
-
-    if BEST_MODELS_PATH.exists():
-        st.subheader("Modèles finaux sélectionnés")
-
-        with BEST_MODELS_PATH.open("r", encoding="utf-8") as f:
-            best_models = json.load(f)
-
-        st.success(
-            f"Meilleur modèle de régression : **{best_models['best_regression_model']}** "
-            f"avec R² = **{best_models['best_regression_r2']:.4f}** "
-            f"et CV R² = **{best_models['best_regression_cv_r2']:.4f}**."
-        )
-
-        st.success(
-            f"Meilleur modèle de classification : **{best_models['best_classification_model']}** "
-            f"avec F1-macro = **{best_models['best_classification_f1_macro']:.4f}** "
-            f"et CV F1-macro = **{best_models['best_classification_cv_f1_macro']:.4f}**."
-        )
-
-        st.write(
-            "Les modèles finaux sont sélectionnés à partir des performances sur le jeu de test "
-            "et des scores de validation croisée afin de limiter le risque de choisir un modèle "
-            "performant uniquement sur un découpage spécifique."
-        )
-
-        st.subheader("Analyse du choix des modèles")
-
-        st.write(
-            "Le modèle **RandomForestRegressor** a été sélectionné car il offre les meilleures "
-            "performances globales en régression, tout en conservant une bonne stabilité en "
-            "validation croisée."
-        )
-
-        st.write(
-            "Les modèles basés sur les arbres, comme Random Forest et Gradient Boosting, sont "
-            "adaptés à ce contexte car ils peuvent capturer des relations non linéaires entre "
-            "les budgets marketing et les ventes."
-        )
-
-        st.write(
-            "Pour la classification, **RandomForestClassifier** a été retenu car il présente le "
-            "meilleur compromis entre précision globale et équilibre des performances entre les classes."
-        )
-
-        st.info(
-            "Même si les performances sont élevées, les résultats doivent être interprétés avec prudence "
-            "car le dataset est synthétique et contient un nombre limité d’observations."
-        )
-
-
-with tab_compare:
-    st.subheader("Comparaison des résultats des modèles")
-    st.info(
-        "Cet onglet compare les modèles de régression et de classification. "
-        "Les métriques ne sont pas directement comparables entre tâches, "
-        "mais permettent de classer les modèles à l’intérieur de chaque famille."
-    )
-
-    reg_metrics_df = pd.read_csv(REG_METRICS_PATH) if REG_METRICS_PATH.exists() else None
-    clf_metrics_df = pd.read_csv(CLF_METRICS_PATH) if CLF_METRICS_PATH.exists() else None
-
-    if reg_metrics_df is None and clf_metrics_df is None:
-        st.warning(
-            "Aucun fichier de métriques trouvé. Lance `python src/train.py` pour générer les résultats."
-        )
-    else:
-        comparison_rows = []
-
-        if reg_metrics_df is not None:
-            if {"Model", "R2", "RMSE"}.issubset(reg_metrics_df.columns):
+            # === RÉGRESSION ===
+            if reg_metrics_df is not None and not reg_metrics_df.empty:
+                st.markdown("### 📊 Classement - Régression")
+                
                 reg_ranked = reg_metrics_df.sort_values(
                     by=["R2", "RMSE"],
                     ascending=[False, True],
                 ).copy()
-                reg_ranked["Rang"] = range(1, len(reg_ranked) + 1)
-                reg_ranked["Tâche"] = "Régression"
-                reg_ranked["Score principal"] = reg_ranked["R2"]
-                reg_ranked["Métrique principale"] = "R2"
-
-                st.write("Classement - Régression (R2 haut, RMSE bas)")
+                reg_ranked.insert(0, "Rang", range(1, len(reg_ranked) + 1))
+                
                 st.dataframe(
                     reg_ranked[["Rang", "Model", "R2", "RMSE"]],
                     use_container_width=True,
+                    hide_index=True
                 )
+                
                 st.bar_chart(reg_ranked[["Model", "R2"]].set_index("Model"))
-
-                comparison_rows.extend(
-                    reg_ranked[["Tâche", "Model", "Métrique principale", "Score principal"]].to_dict("records")
-                )
-            else:
-                st.info(
-                    "Le fichier de régression ne contient pas toutes les colonnes attendues "
-                    "(`Model`, `R2`, `RMSE`)."
-                )
-        else:
-            st.info("Le fichier de métriques de régression est manquant.")
-
-        if clf_metrics_df is not None:
-            if {"Model", "F1_macro", "Accuracy"}.issubset(clf_metrics_df.columns):
+                
+                st.markdown("---")
+            
+            # === CLASSIFICATION ===
+            if clf_metrics_df is not None and not clf_metrics_df.empty:
+                st.markdown("### 🎯 Classement - Classification")
+                
                 clf_ranked = clf_metrics_df.sort_values(
                     by=["F1_macro", "Accuracy"],
                     ascending=[False, False],
                 ).copy()
-                clf_ranked["Rang"] = range(1, len(clf_ranked) + 1)
-                clf_ranked["Tâche"] = "Classification"
-                clf_ranked["Score principal"] = clf_ranked["F1_macro"]
-                clf_ranked["Métrique principale"] = "F1_macro"
-
-                st.write("Classement - Classification (F1_macro haut, Accuracy haut)")
+                clf_ranked.insert(0, "Rang", range(1, len(clf_ranked) + 1))
+                
                 st.dataframe(
                     clf_ranked[["Rang", "Model", "F1_macro", "Accuracy"]],
                     use_container_width=True,
+                    hide_index=True
                 )
+                
                 st.bar_chart(clf_ranked[["Model", "F1_macro"]].set_index("Model"))
 
-                comparison_rows.extend(
-                    clf_ranked[["Tâche", "Model", "Métrique principale", "Score principal"]].to_dict("records")
-                )
-            else:
-                st.info(
-                    "Le fichier de classification ne contient pas toutes les colonnes attendues "
-                    "(`Model`, `F1_macro`, `Accuracy`)."
-                )
-        else:
-            st.info("Le fichier de métriques de classification est manquant.")
-
-        if comparison_rows:
-            st.subheader("Vue consolidée")
-            consolidated_df = pd.DataFrame(comparison_rows)
-            consolidated_df["Modèle"] = (
-                consolidated_df["Tâche"] + " - " + consolidated_df["Model"]
-            )
-
-            st.dataframe(
-                consolidated_df[["Tâche", "Model", "Métrique principale", "Score principal"]],
-                use_container_width=True,
-            )
-            st.bar_chart(consolidated_df[["Modèle", "Score principal"]].set_index("Modèle"))
-
-
-with tab_analysis:
-    st.subheader("Corrélation avec les ventes")
-
-    if CORR_PATH.exists():
-        corr_df = pd.read_csv(CORR_PATH)
-        st.dataframe(corr_df, use_container_width=True)
-
-        chart_df = corr_df[["Feature", "CorrelationWithSales"]].set_index("Feature")
-        st.bar_chart(chart_df)
-
-        if "AbsCorrelation" in corr_df.columns:
-            top_feature = corr_df.sort_values("AbsCorrelation", ascending=False).iloc[0]
-
-            st.success(
-                f"La variable la plus influente est **{top_feature['Feature']}**, "
-                f"avec une corrélation de **{top_feature['CorrelationWithSales']:.3f}** "
-                f"avec les ventes."
-            )
-
-            st.write(
-                "Cela signifie que cette variable présente la relation la plus forte avec les ventes "
-                "dans le dataset. D’un point de vue métier, elle doit donc être suivie de près "
-                "lors de la définition de la stratégie budgétaire marketing."
-            )
-    else:
-        st.info("Le fichier de corrélation est manquant. Lance `python src/train.py`.")
-
-    st.subheader("Synthèse de la validation croisée")
-
-    if CV_PATH.exists():
-        cv_df = pd.read_csv(CV_PATH)
-        st.dataframe(cv_df, use_container_width=True)
-
-        if {"Model", "CVScore"}.issubset(cv_df.columns):
-            st.bar_chart(cv_df[["Model", "CVScore"]].set_index("Model"))
-    else:
-        st.info("Le fichier de synthèse CV est manquant. Lance `python src/train.py`.")
-
-    st.subheader("Stratégie d’entraînement")
-
-    if POLICY_PATH.exists():
-        with POLICY_PATH.open("r", encoding="utf-8") as f:
-            policy = json.load(f)
-
-        training_mode = safe_get(policy, "training_mode", "unknown")
-        max_corr = safe_get(policy, "max_abs_numeric_correlation", None)
-
-        if max_corr is not None:
-            st.info(
-                f"La stratégie d’entraînement a choisi une approche **{training_mode}** "
-                f"car la corrélation numérique la plus forte avec Sales est de **{max_corr:.3f}**."
-            )
-        else:
-            st.info(
-                f"La stratégie d’entraînement a choisi une approche **{training_mode}**."
-            )
-
-        if "top_correlated_features" in policy:
-            st.write("Variables les plus corrélées utilisées pour guider la stratégie de modélisation :")
-
-            top_features_df = pd.DataFrame(policy["top_correlated_features"])
-            st.dataframe(top_features_df, use_container_width=True)
-    else:
-        st.info("Le fichier de politique d'entraînement est manquant.")
