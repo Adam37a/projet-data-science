@@ -20,6 +20,7 @@ BEST_MODELS_PATH = ROOT / "reports" / "best_models.json"
 CORR_PATH = ROOT / "reports" / "correlation_with_sales.csv"
 CV_PATH = ROOT / "reports" / "cv_summary.csv"
 POLICY_PATH = ROOT / "reports" / "model_selection_policy.json"
+OPTIMAL_ALLOCATION_PATH = ROOT / "reports" / "optimal_budget_allocation.json"
 
 
 @st.cache_resource
@@ -34,6 +35,14 @@ def load_classification_model():
     if not CLF_MODEL_PATH.exists():
         return None
     return joblib.load(CLF_MODEL_PATH)
+
+
+@st.cache_data(show_spinner=False)
+def load_optimal_allocation():
+    if not OPTIMAL_ALLOCATION_PATH.exists():
+        return None
+    with OPTIMAL_ALLOCATION_PATH.open("r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def safe_get(data: dict, key: str, default=None):
@@ -112,10 +121,11 @@ section = st.radio(
 )
 
 if section == "👤 Utilisateur":
-    tab_roi, tab_recommend, tab_analysis = st.tabs(
+    tab_roi, tab_recommend, tab_optimal, tab_analysis = st.tabs(
         [
             "🎮 Simulation ROI",
-            "💼 Modèle Business Optimal",
+            "💼 Modèle business optimal par rapport au budget sélectionnée",
+            "🏅 Budget optimal recommandé",
             "📊 Analyse & Interprétabilité",
         ]
     )
@@ -181,11 +191,11 @@ if section == "👤 Utilisateur":
     
     # ========== TAB 2: MODÈLE BUSINESS OPTIMAL ==========
     with tab_recommend:
-        st.subheader("🎯 Allocation Budgétaire Recommandée")
-        
+        st.subheader("🎯 Modèle business optimal par rapport au budget sélectionné")
+
         st.markdown(
-            "Cette section présente l'allocation budgétaire optimale calculée pour **maximiser "
-            "les ventes** en fonction du budget total et du tier d'influenceur sélectionnés."
+            "Cette section analyse le budget saisi par l'utilisateur pour proposer une "
+            "répartition plus rentable, en restant centrée sur le scénario choisi."
         )
         
         if total_budget <= 0:
@@ -351,8 +361,72 @@ if section == "👤 Utilisateur":
                     numérique avancées.
                     """
                 )
+
+    # ========== TAB 3: BUDGET OPTIMAL RECOMMANDÉ ==========
+    with tab_optimal:
+        st.subheader("🏅 Budget optimal recommandé")
+
+        st.markdown(
+            "Cette vue affiche une allocation **fixe** calculée une seule fois en amont. "
+            "Elle ne relance aucun calcul à l’affichage : elle lit simplement l’artefact "
+            "persisté par le pipeline projet."
+        )
+
+        optimal_allocations = load_optimal_allocation()
+
+        if not optimal_allocations or "allocations" not in optimal_allocations:
+            st.warning(
+                "Aucune allocation optimale persistée n’a été trouvée. Exécutez `python run_project.py` "
+                "pour générer `reports/optimal_budget_allocation.json`."
+            )
+        else:
+            allocations = optimal_allocations["allocations"]
+            best_influencer_key = max(
+                allocations,
+                key=lambda k: allocations[k]["reference_predicted_roi"],
+            )
+            best_allocation = allocations[best_influencer_key]
+
+            st.markdown("### 📌 Recommandation fixe retenue")
+
+            col_b1, col_b2, col_b3 = st.columns(3)
+            col_b1.metric("Tier recommandé", best_influencer_key)
+            col_b2.metric("ROI de référence", f"{best_allocation['reference_predicted_roi']:.3f}")
+            col_b3.metric("Ventes de référence", f"{best_allocation['reference_predicted_sales']:,.0f}")
+
+            reference_budget = best_allocation["reference_budget"]
+            optimal_ratio = best_allocation["optimal_ratio"]
+
+            recommended_df = pd.DataFrame(
+                {
+                    "Canal": list(optimal_ratio.keys()),
+                    "Ratio recommandé": list(optimal_ratio.values()),
+                    "Budget recommandé": [reference_budget * optimal_ratio[c] for c in optimal_ratio.keys()],
+                }
+            )
+
+            recommended_df_display = recommended_df.copy()
+            recommended_df_display["Ratio recommandé"] = recommended_df_display["Ratio recommandé"].apply(lambda x: f"{x:.1%}")
+            recommended_df_display["Budget recommandé"] = recommended_df_display["Budget recommandé"].apply(lambda x: f"{x:,.0f}")
+
+            st.dataframe(recommended_df_display, use_container_width=True, hide_index=True)
+
+            st.markdown("### 📊 Visualisation de la répartition fixe")
+            st.bar_chart(recommended_df.set_index("Canal")["Budget recommandé"])
+
+            st.success(
+                f"La combinaison fixe la plus rentable identifiée est **{best_influencer_key}**. "
+                f"En pratique, cela signifie que pour un budget de référence de {reference_budget:,.0f}, "
+                f"le modèle anticipe le meilleur retour en concentrant l’effort sur la répartition ci-dessus."
+            )
+
+            st.info(
+                "L’artefact a été calculé hors affichage et peut être régénéré via le pipeline projet. "
+                "Le but est de fournir une recommandation stable, facile à expliquer au business, "
+                "et sans délai supplémentaire dans l’interface."
+            )
     
-    # ========== TAB 3: ANALYSE & INTERPRÉTABILITÉ ==========
+    # ========== TAB 4: ANALYSE & INTERPRÉTABILITÉ ==========
     with tab_analysis:
         st.subheader("📊 Analyse & Interprétabilité")
         
@@ -403,6 +477,13 @@ if section == "👤 Utilisateur":
                     f"Un score élevé indique que le modèle généralise bien et que ses prédictions "
                     f"sont fiables sur de nouvelles données."
                 )
+                st.success(
+                    "**Ce que cela apporte à votre business :** le modèle a été vérifié sur plusieurs "
+                    "façons de découper les données, pas seulement sur un seul test. Cela réduit le risque "
+                    "de choisir une recommandation qui marche par hasard. Concrètement, vous pouvez vous "
+                    "appuyer davantage sur les budgets recommandés, car ils ont montré une performance "
+                    "stable dans plusieurs situations de test."
+                )
         else:
             st.info("Le fichier de validation croisée n'est pas disponible.")
         
@@ -424,6 +505,20 @@ if section == "👤 Utilisateur":
                 f"Si la corrélation était forte, un modèle plus simple a été privilégié. "
                 f"Sinon, un modèle plus complexe a été utilisé pour capturer les relations non-linéaires."
             )
+
+            if training_mode == "linear_friendly":
+                st.success(
+                    "**Ce que cela change concrètement pour votre business :** le modèle est construit "
+                    "pour des situations où augmenter un budget a un effet assez lisible et régulier sur les ventes. "
+                    "Cela aide à obtenir des recommandations plus stables, plus faciles à expliquer aux équipes, "
+                    "et plus simples à piloter dans le temps. En pratique, on limite les effets de surprise : "
+                    "si vous augmentez l’investissement sur un canal, l’impact attendu reste cohérent et prévisible."
+                )
+            else:
+                st.info(
+                    "**Lecture métier :** le modèle a été choisi pour rester cohérent avec la structure des données. "
+                    "L’objectif est de fournir une recommandation budgétaire facile à comprendre et utile pour la décision."
+                )
             
             if "top_correlated_features" in policy:
                 st.markdown("**Variables clés utilisées pour la modélisation :**")
