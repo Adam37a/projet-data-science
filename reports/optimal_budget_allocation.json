@@ -1,0 +1,49 @@
+{
+  "note": "Optimal budget allocations for ROI maximization (reference budget: 100.0)",
+  "allocations": {
+    "Mega": {
+      "influencer": "Mega",
+      "optimal_ratio": {
+        "TV": 0.8,
+        "Radio": 0.1,
+        "Social Media": 0.09999999999999995
+      },
+      "reference_budget": 100.0,
+      "reference_predicted_sales": 281.93651810514126,
+      "reference_predicted_roi": 2.8193651810514124
+    },
+    "Macro": {
+      "influencer": "Macro",
+      "optimal_ratio": {
+        "TV": 0.8,
+        "Radio": 0.1,
+        "Social Media": 0.09999999999999995
+      },
+      "reference_budget": 100.0,
+      "reference_predicted_sales": 282.6965841830883,
+      "reference_predicted_roi": 2.826965841830883
+    },
+    "Micro": {
+      "influencer": "Micro",
+      "optimal_ratio": {
+        "TV": 0.8,
+        "Radio": 0.1,
+        "Social Media": 0.1
+      },
+      "reference_budget": 100.0,
+      "reference_predicted_sales": 281.93794737139643,
+      "reference_predicted_roi": 2.819379473713964
+    },
+    "Nano": {
+      "influencer": "Nano",
+      "optimal_ratio": {
+        "TV": 0.8,
+        "Radio": 0.1,
+        "Social Media": 0.09999999999999995
+      },
+      "reference_budget": 100.0,
+      "reference_predicted_sales": 281.9469246832427,
+      "reference_predicted_roi": 2.8194692468324267
+    }
+  }
+}
